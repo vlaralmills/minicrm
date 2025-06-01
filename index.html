@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <title>Αναφορά Πελάτη</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { 
+      font-family: sans-serif; 
+      padding: 2rem; 
+      background-color: #f5f5f5;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background-color: white;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    select, button { 
+      font-size: 16px; 
+      padding: 0.5rem; 
+      margin: 0.5rem;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 0 5px;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    #voiceBtn {
+      background-color: #28a745;
+    }
+    #voiceBtn:hover {
+      background-color: #1e7e34;
+    }
+    #voiceBtn.listening {
+      background-color: #dc3545;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
+    }
+    .client-info {
+      background-color: #f8f9fa;
+      padding: 1.5rem;
+      border-radius: 6px;
+      margin: 1rem 0;
+      border-left: 4px solid #007bff;
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .info-item {
+      background-color: white;
+      padding: 1rem;
+      border-radius: 4px;
+      border: 1px solid #dee2e6;
+    }
+    .info-label {
+      font-weight: bold;
+      color: #495057;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+    .info-value {
+      font-size: 1.1em;
+      color: #212529;
+    }
+    .highlight {
+      background-color: #fff3cd;
+      border-color: #ffeaa7;
+    }
+    .collectible {
+      background-color: #d1ecf1;
+      border-color: #bee5eb;
+    }
+    .collectible .info-value {
+      font-weight: bold;
+      color: #0c5460;
+    }
+    .metax-item {
+      background-color: #e7f3ff;
+      border-color: #b3d9ff;
+    }
+    .metax-item .info-value {
+      font-weight: bold;
+      color: #0056b3;
+    }
+    table { 
+      border-collapse: collapse; 
+      margin-top: 1rem; 
+      width: 100%;
+      background-color: white;
+    }
+    th, td { 
+      border: 1px solid #dee2e6; 
+      padding: 8px; 
+      text-align: center; 
+    }
+    th { 
+      background-color: #e9ecef;
+      font-weight: bold;
+      color: #495057;
+    }
+    .total-row {
+      background-color: #f8f9fa;
+      font-weight: bold;
+    }
+    h2 {
+      color: #343a40;
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    h3 {
+      color: #495057;
+      border-bottom: 2px solid #007bff;
+      padding-bottom: 0.5rem;
+    }
+    h4 {
+      color: #6c757d;
+      margin-top: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>📊 Αναφορά Πελάτη</h2>
+    
+    <div style="text-align: center; margin-bottom: 2rem;">
+      <select id="clientSelect" style="min-width: 300px;">
+        <option value="">-- Επιλέξτε Πελάτη --</option>
+        {% for name in clients %}
+        <option value="{{ name }}">{{ name }}</option>
+        {% endfor %}
+      </select>
+      <button onclick="fetchClient()">🔍 Αναζήτηση</button>
+      <button id="voiceBtn" onclick="startVoiceSearch()">🎤 Φωνητική Αναζήτηση</button>
+      <div id="voiceStatus" style="margin-top: 1rem; font-style: italic; color: #6c757d;"></div>
+    </div>
+
+    <div id="result"></div>
+  </div>
+
+  <script>
+    // Δημιουργία αντικειμένου Web Speech API
+    let recognition;
+    let isListening = false;
+
+    // Λίστα πελατών για αναζήτηση
+    let clientsList = [];
+
+    // Φόρτωση λίστας πελατών
+    async function loadClientsList() {
+      try {
+        console.log('Attempting to fetch clients list...');
+        const response = await fetch('/clients-list');
+        console.log('Response status:', response.status);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        clientsList = await response.json();
+        console.log('Clients loaded:', clientsList.length);
+      } catch (error) {
+        console.error('Error loading clients list:', error);
+        // Fallback - δημιουργία λίστας από το dropdown
+        const selectElement = document.getElementById('clientSelect');
+        clientsList = [];
+        
+        console.log('Total options in dropdown:', selectElement.options.length);
+        
+        for (let i = 0; i < selectElement.options.length; i++) {
+          const option = selectElement.options[i];
+          console.log(`Option ${i}: value="${option.value}", text="${option.text}"`);
+          
+          // Παράλειψη της πρώτης επιλογής αν είναι κενή ή placeholder
+          if (option.value && option.value.trim() !== '') {
+            clientsList.push(option.value);
+          }
+        }
+        
+        console.log('Using fallback clients list:', clientsList.length);
+        console.log('Clients array:', clientsList);
+      }
+    }
+
+    // Αρχικοποίηση Speech Recognition
+    function initSpeechRecognition() {
+      if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+        recognition.lang = 'el-GR'; // Ελληνικά
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 5;
+
+        recognition.onstart = function() {
+          console.log('Speech recognition started');
+          document.getElementById('voiceStatus').innerText = '🎤 Ακούω... Πείτε το όνομα του πελάτη';
+          document.getElementById('voiceBtn').classList.add('listening');
+          document.getElementById('voiceBtn').innerText = '🔴 Ακρόαση...';
+          isListening = true;
+        };
+
+        recognition.onresult = function(event) {
+          const spokenText = event.results[0][0].transcript.toLowerCase();
+          console.log('Recognized:', spokenText);
+          
+          document.getElementById('voiceStatus').innerText = `📝 Άκουσα: "${spokenText}"`;
+          
+          // Αναζήτηση του πιο κοντινού πελάτη
+          const matchedClient = findBestMatch(spokenText);
+          
+          if (matchedClient) {
+            document.getElementById('clientSelect').value = matchedClient;
+            document.getElementById('voiceStatus').innerText = `✅ Βρέθηκε: ${matchedClient}`;
+            
+            // Αυτόματη αναζήτηση μετά από 1 δευτερόλεπτο
+            setTimeout(() => {
+              fetchClient();
+            }, 1000);
+          } else {
+            document.getElementById('voiceStatus').innerText = `❌ Δεν βρέθηκε πελάτης που να ταιριάζει με: "${spokenText}"`;
+          }
+        };
+
+        recognition.onerror = function(event) {
+          console.error('Speech recognition error:', event.error);
+          let errorMsg = 'Σφάλμα αναγνώρισης φωνής';
+          
+          switch(event.error) {
+            case 'network':
+              errorMsg = '🌐 Πρόβλημα δικτύου';
+              break;
+            case 'not-allowed':
+              errorMsg = '🚫 Δεν επιτρέπεται η πρόσβαση στο μικρόφωνο';
+              break;
+            case 'no-speech':
+              errorMsg = '🔇 Δεν ανιχνεύτηκε ομιλία';
+              break;
+            default:
+              errorMsg = `❌ Σφάλμα: ${event.error}`;
+          }
+          
+          document.getElementById('voiceStatus').innerText = errorMsg;
+          resetVoiceButton();
+        };
+
+        recognition.onend = function() {
+          console.log('Speech recognition ended');
+          resetVoiceButton();
+        };
+
+        return true;
+      } else {
+        document.getElementById('voiceStatus').innerText = '❌ Ο περιηγητής δεν υποστηρίζει φωνητική αναγνώριση';
+        document.getElementById('voiceBtn').disabled = true;
+        return false;
+      }
+    }
+
+    // Επαναφορά κουμπιού φωνής
+    function resetVoiceButton() {
+      document.getElementById('voiceBtn').classList.remove('listening');
+      document.getElementById('voiceBtn').innerText = '🎤 Φωνητική Αναζήτηση';
+      isListening = false;
+    }
+
+    // Εύρεση καλύτερου ταιριάσματος
+    function findBestMatch(spokenText) {
+      let bestMatch = null;
+      let bestScore = 0;
+
+      for (const client of clientsList) {
+        const score = calculateSimilarity(spokenText, client.toLowerCase());
+        if (score > bestScore && score > 0.3) { // Κατώφλι ομοιότητας
+          bestScore = score;
+          bestMatch = client;
+        }
+      }
+
+      return bestMatch;
+    }
+
+    // Υπολογισμός ομοιότητας μεταξύ δύο κειμένων
+    function calculateSimilarity(text1, text2) {
+      // Κανονικοποίηση κειμένων
+      text1 = normalizeGreekText(text1);
+      text2 = normalizeGreekText(text2);
+
+      // Έλεγχος αν το κείμενο περιέχεται στο όνομα πελάτη
+      if (text2.includes(text1) || text1.includes(text2)) {
+        return 0.8;
+      }
+
+      // Διαίρεση σε λέξεις και έλεγχος κοινών λέξεων
+      const words1 = text1.split(/\s+/);
+      const words2 = text2.split(/\s+/);
+      
+      let matchingWords = 0;
+      for (const word1 of words1) {
+        if (word1.length > 2) { // Αγνόηση πολύ μικρών λέξεων
+          for (const word2 of words2) {
+            if (word2.includes(word1) || word1.includes(word2)) {
+              matchingWords++;
+              break;
+            }
+          }
+        }
+      }
+
+      return matchingWords / Math.max(words1.length, words2.length);
+    }
+
+    // Κανονικοποίηση ελληνικού κειμένου
+    function normalizeGreekText(text) {
+      return text
+        .toLowerCase()
+        .replace(/ά/g, 'α').replace(/έ/g, 'ε').replace(/ή/g, 'η')
+        .replace(/ί/g, 'ι').replace(/ό/g, 'ο').replace(/ύ/g, 'υ')
+        .replace(/ώ/g, 'ω').replace(/ΐ/g, 'ι').replace(/ΰ/g, 'υ')
+        .replace(/[^\u0370-\u03FF\u1F00-\u1FFF\s]/g, ''); // Κράτηση μόνο ελληνικών χαρακτήρων
+    }
+
+    // Έναρξη φωνητικής αναζήτησης
+    function startVoiceSearch() {
+      if (clientsList.length === 0) {
+        document.getElementById('voiceStatus').innerText = '⏳ Φόρτωση λίστας πελατών...';
+        return;
+      }
+
+      if (!recognition) {
+        if (!initSpeechRecognition()) {
+          return;
+        }
+      }
+
+      if (isListening) {
+        recognition.stop();
+        return;
+      }
+
+      try {
+        recognition.start();
+      } catch (error) {
+        console.error('Error starting recognition:', error);
+        document.getElementById('voiceStatus').innerText = '❌ Σφάλμα έναρξης αναγνώρισης φωνής';
+      }
+    }
+
+    // Αρχικοποίηση κατά τη φόρτωση της σελίδας
+    window.onload = async function() {
+      await loadClientsList();
+      initSpeechRecognition();
+    };
+
+    // Κύρια συνάρτηση αναζήτησης πελάτη
+    function fetchClient() {
+      const name = document.getElementById('clientSelect').value;
+      if (!name) return alert('Επιλέξτε πελάτη');
+
+      fetch(`/client?name=${encodeURIComponent(name)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) return alert(data.error);
+
+          const months = data['Μήνες'] || [];
+          const turnover = data['Μηνιαίος Τζίρος'] || {};
+          const materials = data['Υλικά'] || [];
+
+          // Προσδιορισμός κλάσης CSS για το εισπρακτέο ποσό
+          const collectibleAmount = data['Εισπρακτέο Ποσό'];
+          const collectibleClass = (collectibleAmount > 0) ? 'collectible' : '';
+
+          // Προσδιορισμός κλάσης CSS για το Μεταχ
+          const metaxValue = data['Μεταχ'];
+          const metaxClass = (metaxValue !== 0 && metaxValue !== '-') ? 'metax-item' : '';
+
+          let html = `
+            <div class="client-info">
+              <h3>📋 Στοιχεία Πελάτη</h3>
+              <div class="info-grid">
+                <div class="info-item">
+                  <span class="info-label">👤 Όνομα:</span>
+                  <span class="info-value">${data['Ονομα 1']}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">💳 Πληρωτής:</span>
+                  <span class="info-value">${data['Πληρωτής']}</span>
+                </div>
+                <div class="info-item ${metaxClass}">
+                  <span class="info-label">📊 Μεταχ:</span>
+                  <span class="info-value">${typeof metaxValue === 'number' ? metaxValue.toFixed(2) + '€' : metaxValue}</span>
+                </div>
+                <div class="info-item highlight">
+                  <span class="info-label">💰 Τρέχον Υπόλοιπο:</span>
+                  <span class="info-value">${typeof data['Τρέχον Υπόλοιπο'] === 'number' ? data['Τρέχον Υπόλοιπο'].toFixed(2) + '€' : data['Τρέχον Υπόλοιπο']}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">📅 Ημέρες Πίστωσης:</span>
+                  <span class="info-value">${data['Ημέρες Πίστωσης']}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">📋 Ημέρες Βάση Συμφωνίας:</span>
+                  <span class="info-value">${data['Ημέρες Βάση Συμφωνίας']}</span>
+                </div>
+                <div class="info-item ${collectibleClass}">
+                  <span class="info-label">🎯 Εισπρακτέο Ποσό:</span>
+                  <span class="info-value">${typeof collectibleAmount === 'number' ? collectibleAmount.toFixed(2) + '€' : collectibleAmount}</span>
+                </div>
+              </div>
+            </div>
+
+            <h4>📈 Τζίρος & Χρήση Υλικών</h4>
+            <table>
+              <tr>
+                <th>Υλικό</th>
+                <th>Τιμή/συσκ.(€)</th>
+                ${months.map(m => `<th>${m}</th>`).join('')}
+              </tr>
+              <tr class="total-row">
+                <td><strong>💼 Σύνολο Τζίρου</strong></td>
+                <td>–</td>
+                ${months.map(m => `<td><strong>${(turnover[m] || 0).toFixed(2)}€</strong></td>`).join('')}
+              </tr>`;
+
+          for (const mat of materials) {
+            html += `
+              <tr>
+                <td style="text-align: left;">${mat['Υλικό']}</td>
+                <td>${mat['Τιμή ανά συσκευασία']?.toFixed(2) || '-'}€</td>
+                ${months.map(m => `<td>${(mat[m] || 0).toFixed(2)}</td>`).join('')}
+              </tr>`;
+          }
+
+          html += '</table>';
+          document.getElementById('result').innerHTML = html;
+
+          // Καθαρισμός μηνύματος φωνητικής αναζήτησης μετά από επιτυχημένη αναζήτηση
+          setTimeout(() => {
+            document.getElementById('voiceStatus').innerText = '';
+          }, 3000);
+        })
+        .catch(err => {
+          console.error('Error:', err);
+          alert('Σφάλμα κατά την ανάκτηση δεδομένων');
+        });
+    }
+  </script>
+</body>
+</html>
