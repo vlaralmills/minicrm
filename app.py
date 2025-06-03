@@ -601,12 +601,28 @@ def parse_month_data(month_str):
     return None, None
 
 def calculate_credit_days(client_df, balance):
-    """Υπολογισμός ημερών πίστωσης"""
+    """
+    ΤΕΛΙΚΗ ΛΥΣΗ: Υπολογισμός ημερών πίστωσης με σωστή προσθήκη όλων των ημερών
+    """
+    print(f"\n=== ΥΠΟΛΟΓΙΣΜΟΣ ΗΜΕΡΩΝ ΠΙΣΤΩΣΗΣ ===")
+    print(f"Balance: {balance}, Type: {type(balance)}")
+    
     if not isinstance(balance, (int, float)) or balance <= 0:
+        print(f"Invalid balance: {balance}")
         return '-'
     
     working_df = client_df.copy()
+    print(f"Total rows for client: {len(working_df)}")
     
+    # Τρέχουσα ημερομηνία
+    today = datetime.now()
+    current_year = today.year
+    current_month = today.month
+    current_day = today.day
+    
+    print(f"Today: {today.strftime('%Y-%m-%d')} (Day {current_day} of month {current_month})")
+    
+    # Parsing μηνών
     month_year_data = []
     for idx, row in working_df.iterrows():
         month_str = row.get('Μήνας', '')
@@ -615,8 +631,9 @@ def calculate_credit_days(client_df, balance):
         
         if year is None and pd.notna(year_from_col):
             year = int(year_from_col)
+        
         if year is None:
-            year = datetime.now().year
+            year = current_year
             
         month_year_data.append({
             'month': month,
@@ -624,14 +641,19 @@ def calculate_credit_days(client_df, balance):
             'amount': row.get('Μικτό ποσό', 0)
         })
     
+    # Φιλτράρισμα έγκυρων δεδομένων
     valid_data = [
         d for d in month_year_data 
-        if d['month'] is not None and d['year'] is not None and pd.notna(d['amount']) and d['amount'] > 0
+        if d['month'] is not None and d['year'] is not None and pd.notna(d['amount'])
     ]
     
+    print(f"Valid records: {len(valid_data)}")
+    
     if len(valid_data) == 0:
+        print("No valid data found")
         return '-'
     
+    # Συνάθροιση ανά μήνα/έτος
     month_totals = {}
     for d in valid_data:
         key = (d['year'], d['month'])
@@ -639,29 +661,94 @@ def calculate_credit_days(client_df, balance):
             month_totals[key] = 0
         month_totals[key] += d['amount']
     
+    # Ταξινόμηση από το πιο πρόσφατο στο παλιότερο
     sorted_months = sorted(month_totals.items(), key=lambda x: (x[0][0], x[0][1]), reverse=True)
     
-    cumulative = 0
-    total_days = 0
-    
+    print(f"\nMonthly totals (most recent first):")
     for (year, month), amount in sorted_months:
-        try:
-            days_in_month = calendar.monthrange(year, month)[1]
-            daily_rate = amount / days_in_month
-            
+        print(f"  {month:2d}/{year}: {amount:8.2f}€")
+    
+    # ΝΕΑ ΠΡΟΣΕΓΓΙΣΗ: Δυο-φασικός υπολογισμός
+    
+    # ΦΑΣΗ 1: Βρες ποιος μήνας καλύπτει το balance (χωρίς να μετράς ημέρες ακόμα)
+    cumulative = 0
+    covering_month_index = -1
+    partial_days_needed = 0
+    total_revenue = sum(amount for _, amount in sorted_months)
+    
+    print(f"\n--- ΦΑΣΗ 1: ΕΞΡΕΣΗ ΜΗΝΑ ΚΑΛΥΨΗΣ ---")
+    for i, ((year, month), amount) in enumerate(sorted_months):
+        print(f"Month {i}: {month}/{year}, Amount: {amount:.2f}€")
+        
+        if amount > 0:  # Μόνο μήνες με τζίρο μπορούν να καλύψουν balance
             if cumulative + amount >= balance:
+                covering_month_index = i
                 remaining_needed = balance - cumulative
-                partial_days = remaining_needed / daily_rate if daily_rate > 0 else 0
-                total_days += partial_days
+                
+                # Υπολογισμός ημερών για τον μήνα κάλυψης
+                is_current_month = (year == current_year and month == current_month)
+                days_in_covering_month = current_day if is_current_month else calendar.monthrange(year, month)[1]
+                daily_rate = amount / days_in_covering_month
+                partial_days_needed = remaining_needed / daily_rate if daily_rate > 0 else 0
+                
+                print(f"  ** COVERING MONTH FOUND at index {i} **")
+                print(f"  Remaining needed: {remaining_needed:.2f}€")
+                print(f"  Partial days needed: {partial_days_needed:.2f}")
                 break
             else:
                 cumulative += amount
-                total_days += days_in_month
-                
-        except (ValueError, TypeError):
-            continue
+                print(f"  Not enough. Cumulative: {cumulative:.2f}€")
     
-    return round(total_days) if total_days > 0 else '-'
+    # ΦΑΣΗ 2: Μέτρησε ΟΛΕΣ τις ημέρες
+    total_days = 0
+    
+    print(f"\n--- ΦΑΣΗ 2: ΜΕΤΡΗΣΗ ΟΛΩΝ ΤΩΝ ΗΜΕΡΩΝ ---")
+    
+    if covering_month_index == -1:
+        # Δεν βρέθηκε μήνας κάλυψης - αναλογικός υπολογισμός
+        print("No covering month found - using proportional calculation")
+        
+        # Μέτρησε όλες τις ημέρες
+        for i, ((year, month), amount) in enumerate(sorted_months):
+            is_current_month = (year == current_year and month == current_month)
+            days_used = current_day if is_current_month else calendar.monthrange(year, month)[1]
+            total_days += days_used
+            print(f"  Month {i}: +{days_used} days, Total: {total_days}")
+        
+        if total_revenue > 0:
+            revenue_ratio = balance / total_revenue
+            proportional_days = total_days * revenue_ratio
+            
+            print(f"\nProportional calculation:")
+            print(f"  Total days in data: {total_days}")
+            print(f"  Revenue ratio: {revenue_ratio:.2f}x")
+            print(f"  Result: {total_days} × {revenue_ratio:.2f} = {proportional_days:.1f}")
+            
+            result = round(proportional_days)
+            print(f"\n📊 PROPORTIONAL RESULT: {result} days")
+            return result
+    else:
+        # Βρέθηκε μήνας κάλυψης - κανονικός υπολογισμός
+        print(f"Covering month found at index {covering_month_index}")
+        
+        # Μέτρησε ΟΛΕΣ τις ημέρες μέχρι και τον μήνα κάλυψης
+        for i, ((year, month), amount) in enumerate(sorted_months):
+            is_current_month = (year == current_year and month == current_month)
+            days_used = current_day if is_current_month else calendar.monthrange(year, month)[1]
+            
+            if i < covering_month_index:
+                # Μήνες ΜΕΤΑ τον μήνα κάλυψης - προσθέτουμε όλες τις ημέρες
+                total_days += days_used
+                print(f"  Month {i} (after covering): +{days_used} days, Total: {total_days}")
+            elif i == covering_month_index:
+                # Ο μήνας κάλυψης - προσθέτουμε μερικές ημέρες
+                total_days += partial_days_needed
+                print(f"  Month {i} (covering): +{partial_days_needed:.2f} days, Total: {total_days:.2f}")
+                break
+    
+    result = round(total_days) if total_days > 0 else '-'
+    print(f"\n✅ FINAL RESULT: {result} days")
+    return result
 
 def calculate_collectible_amount(balance, credit_days, agreement_days):
     """Υπολογισμός εισπρακτέου ποσού"""
